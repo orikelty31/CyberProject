@@ -1,0 +1,113 @@
+{
+  "_instructions": [
+    "Edit this file to add your own questions.",
+    "Each question must contain:",
+    "  'question' – the question text",
+    "  'options'  – a list of exactly 4 answer choices",
+    "  'answer'   – the index of the correct answer (0=first, 1=second, 2=third, 3=fourth)",
+    "              you can also write the full text of the correct answer instead of a number",
+    "The game will randomly select up to NUM_ROUNDS questions from the list."
+  ],
+  "questions": [
+    {
+      "question": "What is the capital of France?",
+      "options": [
+        "London",
+        "Berlin",
+        "Paris",
+        "Madrid"
+      ],
+      "answer": 2
+    },
+    {
+      "question": "How many legs does a spider have?",
+      "options": [
+        "4",
+        "6",
+        "8",
+        "10"
+      ],
+      "answer": 2
+    },
+    {
+      "question": "Who wrote 'Romeo and Juliet'?",
+      "options": [
+        "Dickens",
+        "Shakespeare",
+        "Hemingway",
+        "Tolstoy"
+      ],
+      "answer": 1
+    },
+    {
+      "question": "What is the largest planet in the solar system?",
+      "options": [
+        "Saturn",
+        "Neptune",
+        "Mars",
+        "Jupiter"
+      ],
+      "answer": "Jupiter"
+    },
+    {
+      "question": "In what year did the first man land on the moon?",
+      "options": [
+        "1965",
+        "1969",
+        "1972",
+        "1959"
+      ],
+      "answer": 1
+    },
+    {
+      "question": "What is the chemical formula for water?",
+      "options": [
+        "CO2",
+        "NaCl",
+        "H2O",
+        "O2"
+      ],
+      "answer": "H2O"
+    },
+    {
+      "question": "What is the longest river in the world?",
+      "options": [
+        "Amazon",
+        "Nile",
+        "Mississippi",
+        "Yangtze"
+      ],
+      "answer": 1
+    },
+    {
+      "question": "How many sides does a triangle have?",
+      "options": [
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "answer": 1
+    },
+    {
+      "question": "Who painted the Mona Lisa?",
+      "options": [
+        "Michelangelo",
+        "Raphael",
+        "Leonardo da Vinci",
+        "Botticelli"
+      ],
+      "answer": 2
+    },
+    {
+      "question": "How many eggs are in a dozen?",
+      "options": [
+        "10",
+        "11",
+        "12",
+        "13"
+      ],
+      "answer": 2
+    }
+  ]
+}
