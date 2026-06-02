@@ -1,385 +1,420 @@
 """
-trivia_client.py
-================
-Graphical (Tkinter) client for a multiplayer trivia game.
-
-Run:  python trivia_client.py
+title: trivia project - client
+description: Simple Tkinter GUI client for the trivia game.
 """
 
 import socket
 import threading
-import json
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 
+import protocol
 
-# ─────────────────────────────────────────────
-# Connection settings
-# ─────────────────────────────────────────────
-HOST = "127.0.0.1"
-PORT = 5555
 
-# ─────────────────────────────────────────────
-# Color theme and design
-# ─────────────────────────────────────────────
-THEME = {
-    "bg_dark": "#0d0d1a",
-    "bg_card": "#1a1a2e",
-    "bg_panel": "#16213e",
-    "accent": "#e94560",
-    "accent2": "#0f3460",
-    "text_main": "#eaeaea",
-    "text_muted": "#888aaa",
-    "btn_normal": "#1a1a2e",
-    "btn_hover": "#e94560",
-    "btn_correct": "#2ecc71",
-    "btn_wrong": "#e74c3c",
-    "btn_text": "#eaeaea",
-    "timer_high": "#2ecc71",
-    "timer_mid": "#f39c12",
-    "timer_low": "#e74c3c",
+SERVER_IP = "127.0.0.1"
+SERVER_PORT = 5555
+
+WINDOW_TITLE = "Trivia Game"
+WINDOW_SIZE = "700x550"
+ANSWER_AMOUNT = 4
+QUESTION_WRAP_LENGTH = 620
+
+BG_COLOR = "#202124"
+PANEL_COLOR = "#303134"
+TEXT_COLOR = "white"
+BUTTON_COLOR = "#3c4043"
+SELECTED_COLOR = "#1565c0"
+CORRECT_COLOR = "#2e7d32"
+WRONG_COLOR = "#c62828"
+
+TITLE_FONT = ("Arial", 24, "bold")
+QUESTION_FONT = ("Arial", 15)
+ANSWER_FONT = ("Arial", 13)
+TIMER_FONT = ("Arial", 18, "bold")
+TEXT_FONT = ("Arial", 12)
+
+MSG_JOIN = "JOIN"
+MSG_WAIT = "WAIT"
+MSG_QUESTION = "QUESTION"
+MSG_TIMER = "TIMER"
+MSG_RESULT = "RESULT"
+MSG_SCORES = "SCORES"
+MSG_GAMEOVER = "GAMEOVER"
+MSG_ANSWER = "ANSWER"
+
+MESSAGE_FIELDS_AMOUNT = {
+    MSG_WAIT: 1,
+    MSG_QUESTION: 5,
+    MSG_TIMER: 1,
+    MSG_RESULT: 3,
+    MSG_SCORES: 1,
+    MSG_GAMEOVER: 3
 }
 
-FONT_TITLE = ("Georgia", 26, "bold")
-FONT_ROUND = ("Courier New", 11, "bold")
-FONT_Q = ("Georgia", 15)
-FONT_BTN = ("Georgia", 13)
-FONT_TIMER = ("Courier New", 36, "bold")
-FONT_SCORE = ("Courier New", 11)
-FONT_STATUS = ("Courier New", 12)
+
+client_socket = None
+username = ""
+answered = False
+client_closed = False
+
+root = None
+question_label = None
+timer_label = None
+status_label = None
+score_text = None
+answer_buttons = []
 
 
-# ─────────────────────────────────────────────
-# Client class
-# ─────────────────────────────────────────────
-# noinspection PyBroadException
-class TriviaClient:
-    def __init__(self, root: tk.Tk):
-        self.root = root
-        self.sock: socket.socket | None = None
-        self.username = ""
-        self.answered = False
-        self.timer_val = 0
-        self._timer_job = None
+def set_status(text):
+    """
+    Change the status text.
+    :param text: text to show
+    :return: None
+    """
+    status_label.config(text=text)
 
-        root.title("🎯 Trivia Network Game")
-        root.configure(bg=THEME["bg_dark"])
-        root.resizable(False, False)
-        root.geometry("1920x1080")
 
-        self._build_ui()
-        self._ask_connect()
+def connect_to_server():
+    """
+    Ask for username and connect to the server.
+    :return: True if connected, False otherwise
+    """
+    global client_socket, username
 
-    # ─── Build UI ────────────────────────────
+    username = simpledialog.askstring("Join Game", "Enter your name:", parent=root)
+    if username is None or username.strip() == "":
+        return False
 
-    def _build_ui(self):
-        """Builds all GUI components."""
-        # Header
-        hdr = tk.Frame(self.root, bg=THEME["bg_dark"])
-        hdr.pack(fill="x", padx=20, pady=(18, 0))
+    username = username.strip()
 
-        tk.Label(
-            hdr, text="🎯 TRIVIA NETWORK", font=FONT_TITLE,
-            bg=THEME["bg_dark"], fg=THEME["accent"]
-        ).pack(side="left")
+    try:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((SERVER_IP, SERVER_PORT))
+        message = protocol.build_message(MSG_JOIN, [username])
+        protocol.send_message(client_socket, message)
+        set_status("Connected as " + username)
+        return True
+    except Exception as e:
+        messagebox.showerror("Connection Error", str(e))
+        return False
 
-        self.lbl_round = tk.Label(
-            hdr, text="", font=FONT_ROUND,
-            bg=THEME["bg_dark"], fg=THEME["text_muted"]
-        )
-        self.lbl_round.pack(side="right", padx=8)
 
-        # Divider
-        tk.Frame(self.root, bg=THEME["accent"], height=2).pack(
-            fill="x", padx=20, pady=10
-        )
+def start_listening():
+    """
+    Start a thread that listens to the server.
+    :return: None
+    """
+    thread = threading.Thread(target=listen_to_server, daemon=True)
+    thread.start()
 
-        # Question area
-        q_frame = tk.Frame(self.root, bg=THEME["bg_card"], bd=0)
-        q_frame.pack(fill="x", padx=20, pady=(0, 12))
 
-        self.lbl_question = tk.Label(
-            q_frame,
-            text="Waiting for server...",
-            font=FONT_Q,
-            bg=THEME["bg_card"],
-            fg=THEME["text_main"],
-            wraplength=680,
-            justify="center",
-            pady=18,
-            padx=14,
-        )
-        self.lbl_question.pack(fill="x")
-
-        # Answer buttons
-        btn_outer = tk.Frame(self.root, bg=THEME["bg_dark"])
-        btn_outer.pack(fill="x", padx=20, pady=(0, 12))
-
-        self.answer_buttons: list[tk.Button] = []
-        for i in range(4):
-            row = i // 2
-            col = i % 2
-            btn = tk.Button(
-                btn_outer,
-                text="",
-                font=FONT_BTN,
-                bg=THEME["btn_normal"],
-                fg=THEME["btn_text"],
-                activebackground=THEME["btn_hover"],
-                activeforeground="#fff",
-                relief="flat",
-                bd=0,
-                cursor="hand2",
-                height=2,
-                wraplength=330,
-                command=lambda idx=i: self._send_answer(idx),
-            )
-            btn.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
-            self._add_hover(btn, i)
-            self.answer_buttons.append(btn)
-
-        btn_outer.columnconfigure(0, weight=1)
-        btn_outer.columnconfigure(1, weight=1)
-
-        # Timer + scoreboard
-        bottom = tk.Frame(self.root, bg=THEME["bg_dark"])
-        bottom.pack(fill="x", padx=20, pady=(0, 10))
-
-        # Timer
-        timer_frame = tk.Frame(bottom, bg=THEME["bg_panel"], padx=20, pady=10)
-        timer_frame.pack(side="left", fill="both", expand=True, padx=(0, 8))
-
-        tk.Label(
-            timer_frame, text="⏱ TIME", font=FONT_ROUND,
-            bg=THEME["bg_panel"], fg=THEME["text_muted"]
-        ).pack()
-
-        self.lbl_timer = tk.Label(
-            timer_frame, text="--",
-            font=FONT_TIMER,
-            bg=THEME["bg_panel"],
-            fg=THEME["timer_high"],
-        )
-        self.lbl_timer.pack()
-
-        # Scoreboard
-        score_frame = tk.Frame(bottom, bg=THEME["bg_panel"], padx=14, pady=10)
-        score_frame.pack(side="right", fill="both", expand=True)
-
-        tk.Label(
-            score_frame, text="🏆 SCOREBOARD", font=FONT_ROUND,
-            bg=THEME["bg_panel"], fg=THEME["text_muted"]
-        ).pack(anchor="w")
-
-        self.score_text = tk.Text(
-            score_frame,
-            font=FONT_SCORE,
-            bg=THEME["bg_panel"],
-            fg=THEME["text_main"],
-            relief="flat",
-            height=5,
-            width=30,
-            state="disabled",
-        )
-        self.score_text.pack(fill="both", expand=True)
-
-        # Status bar
-        self.lbl_status = tk.Label(
-            self.root,
-            text="Not connected",
-            font=FONT_STATUS,
-            bg=THEME["bg_dark"],
-            fg=THEME["text_muted"],
-            anchor="w",
-        )
-        self.lbl_status.pack(fill="x", padx=22, pady=(0, 12))
-
-    def _add_hover(self, btn: tk.Button, idx: int):
-        btn.bind("<Enter>", lambda e: btn.config(bg=THEME["btn_hover"]) if btn["state"] != "disabled" else None)
-        btn.bind("<Leave>", lambda e: btn.config(bg=THEME["btn_normal"]) if btn["state"] != "disabled" else None)
-
-    # ─── Connection ──────────────────────────
-
-    def _ask_connect(self):
-        """Asks for a username and connects to the server."""
-        name = simpledialog.askstring(
-            "Join Game", "Enter your username:",
-            parent=self.root
-        )
-        if not name:
-            self.root.destroy()
-            return
-        self.username = name.strip() or "Guest"
-        self._connect()
-
-    def _connect(self):
+def listen_to_server():
+    """
+    Receive messages from the server.
+    This runs in a separate thread.
+    :return: None
+    """
+    while not client_closed:
         try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((HOST, PORT))
-            self._send_raw(f"JOIN {self.username}")
-            self._set_status(f"Connected as {self.username}")
-            # Listener thread
-            t = threading.Thread(target=self._listen_loop, daemon=True)
-            t.start()
-        except Exception as e:
-            messagebox.showerror("Connection Error", f"Could not connect to server:\n{e}")
-            self.root.destroy()
+            message = protocol.receive_message(client_socket)
+            if message is None:
+                break
 
-    # ─── Server listener ─────────────────────
+            msg_type, fields = protocol.split_message(message)
+            root.after(0, handle_server_message, msg_type, fields)
 
-    def _listen_loop(self):
-        """Runs in a separate thread; receives messages and passes them to the GUI."""
-        buf = ""
-        try:
-            while True:
-                chunk = self.sock.recv(4096).decode("utf-8")
-                if not chunk:
-                    break
-                buf += chunk
-                while "\n" in buf:
-                    line, buf = buf.split("\n", 1)
-                    line = line.strip()
-                    if line:
-                        self.root.after(0, self._handle_server_msg, line)
         except Exception:
-            pass
-        self.root.after(0, self._on_disconnect)
+            break
 
-    def _handle_server_msg(self, line: str):
-        """Parses a server message and updates the GUI."""
-        parts = line.split(" ", 1)
-        msg_type = parts[0]
-        payload = parts[1] if len(parts) > 1 else ""
+    if not client_closed:
+        root.after(0, server_disconnected)
 
-        if msg_type == "WAIT":
-            self._set_status(payload)
 
-        elif msg_type == "QUESTION":
-            data = json.loads(payload)
-            self._show_question(data)
+def handle_server_message(msg_type, fields):
+    """
+    Handle one message from the server.
+    :param msg_type: message type
+    :param data: message data
+    :return: None
+    """
+    try:
+        if msg_type in MESSAGE_FIELDS_AMOUNT:
+            if len(fields) < MESSAGE_FIELDS_AMOUNT[msg_type]:
+                set_status("Bad message from server: " + msg_type)
+                return
 
-        elif msg_type == "TIMER":
-            secs = int(payload)
-            self._update_timer(secs)
+        if msg_type == MSG_WAIT:
+            set_status(fields[0])
 
-        elif msg_type == "RESULT":
-            data = json.loads(payload)
-            self._show_result(data)
+        elif msg_type == MSG_QUESTION:
+            data = {
+                "round": int(fields[0]),
+                "total": int(fields[1]),
+                "question": fields[2],
+                "options": protocol.split_list(fields[3]),
+                "time": int(fields[4])
+            }
+            show_question(data)
 
-        elif msg_type == "SCORES":
-            data = json.loads(payload)
-            self._update_scores(data)
+        elif msg_type == MSG_TIMER:
+            timer_label.config(text="Time: " + fields[0])
 
-        elif msg_type == "GAMEOVER":
-            data = json.loads(payload)
-            self._show_gameover(data)
+        elif msg_type == MSG_RESULT:
+            data = {
+                "correct_index": int(fields[0]),
+                "correct_text": fields[1],
+                "scorers": protocol.split_list(fields[2])
+            }
+            show_result(data)
 
-    # ─── GUI updates ─────────────────────────
+        elif msg_type == MSG_SCORES:
+            data = protocol.split_scores(fields[0])
+            show_scores(data)
 
-    def _show_question(self, data: dict):
-        """Displays a new question."""
-        self.answered = False
-        rnd = data.get("round", 1)
-        total = data.get("total", 1)
-        self.lbl_round.config(text=f"Round {rnd}/{total}")
-        self.lbl_question.config(text=data["question"], fg=THEME["text_main"])
-        options = data["options"]
-        for i, btn in enumerate(self.answer_buttons):
-            btn.config(
-                text=f"{chr(65 + i)}.  {options[i]}",
-                bg=THEME["btn_normal"],
-                state="normal",
-            )
-        self._update_timer(data.get("timeout", 15))
-        self._set_status("Choose an answer!")
+        elif msg_type == MSG_GAMEOVER:
+            scores = protocol.split_scores(fields[2])
+            data = {
+                "winner": fields[0],
+                "is_tie": fields[1],
+                "scores": list(scores.items())
+            }
+            show_game_over(data)
+    except Exception as e:
+        set_status("Message error: " + str(e))
 
-    def _update_timer(self, secs: int):
-        self.timer_val = secs
-        color = (
-            THEME["timer_high"] if secs > 8
-            else THEME["timer_mid"] if secs > 4
-            else THEME["timer_low"]
+
+def show_question(data):
+    """
+    Show a question on the screen.
+    :param data: question data from server
+    :return: None
+    """
+    global answered
+
+    answered = False
+
+    title = "Round " + str(data["round"]) + " of " + str(data["total"])
+    question_label.config(text=title + "\n\n" + data["question"])
+    timer_label.config(text="Time: " + str(data["time"]))
+    set_status("Choose an answer")
+
+    options = data["options"]
+
+    for i in range(ANSWER_AMOUNT):
+        answer_buttons[i].config(
+            text=str(i+1) + ". " + options[i],
+            bg=BUTTON_COLOR,
+            state="normal"
         )
-        self.lbl_timer.config(text=str(secs), fg=color)
 
-    def _show_result(self, data: dict):
-        """Displays round results – highlights correct/wrong answer."""
-        correct_idx = data["correct_index"]
-        correct_text = data["correct_text"]
-        scorers = data.get("scorers", [])
 
-        for i, btn in enumerate(self.answer_buttons):
-            if i == correct_idx:
-                btn.config(bg=THEME["btn_correct"], state="disabled")
-            else:
-                btn.config(bg=THEME["btn_wrong"], state="disabled")
+def send_answer(index):
+    """
+    Send the selected answer to the server.
+    :param index: answer index
+    :return: None
+    """
+    global answered
 
-        if self.username in scorers:
-            self._set_status(f"✅ Correct! +10 points   |   Answer: {correct_text}")
+    if answered:
+        return
+
+    answered = True
+
+    for button in answer_buttons:
+        button.config(state="disabled")
+
+    answer_buttons[index].config(bg=SELECTED_COLOR)
+    set_status("Waiting for result...")
+
+    try:
+        message = protocol.build_message(MSG_ANSWER, [index])
+        protocol.send_message(client_socket, message)
+    except Exception as e:
+        set_status("Send error: " + str(e))
+
+
+def show_result(data):
+    """
+    Show the correct answer after a round.
+    :param data: result data from server
+    :return: None
+    """
+    correct_index = data["correct_index"]
+
+    for i in range(ANSWER_AMOUNT):
+        if i == correct_index:
+            answer_buttons[i].config(bg=CORRECT_COLOR)
         else:
-            self._set_status(f"❌ Wrong.   |   Answer: {correct_text}")
+            answer_buttons[i].config(bg=WRONG_COLOR)
 
-    def _update_scores(self, scores: dict):
-        """Updates the scoreboard."""
-        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        lines = []
-        for rank, (name, score) in enumerate(sorted_scores, 1):
-            marker = "★ " if name == self.username else "  "
-            lines.append(f"{rank}. {marker}{name:<14} {score:>4} pts")
-        text = "\n".join(lines) if lines else "No players"
-        self.score_text.config(state="normal")
-        self.score_text.delete("1.0", "end")
-        self.score_text.insert("end", text)
-        self.score_text.config(state="disabled")
+    if username in data["scorers"]:
+        set_status("Correct! Answer: " + data["correct_text"])
+    else:
+        set_status("Wrong. Answer: " + data["correct_text"])
 
-    def _show_gameover(self, data: dict):
-        """Displays the game-over screen."""
-        winner = data.get("winner", "?")
-        sorted_scores = data.get("scores", [])
-        lines = ["🏁 Game Over!\n"]
-        for rank, (name, score) in enumerate(sorted_scores, 1):
-            lines.append(f"{rank}. {name} – {score} points")
-        if winner == self.username:
-            lines.insert(1, "🎉 Congratulations – you won!")
+
+def show_scores(scores):
+    """
+    Show the score table.
+    :param scores: dictionary of name -> score
+    :return: None
+    """
+    score_text.config(state="normal")
+    score_text.delete("1.0", "end")
+
+    for name, score in scores.items():
+        score_text.insert("end", name + " - " + str(score) + "\n")
+
+    score_text.config(state="disabled")
+
+
+def show_game_over(data):
+    """
+    Show final result.
+    :param data: game over data
+    :return: None
+    """
+    if data["is_tie"] == "True":
+        text = "Tie between: " + data["winner"] + "\n\n"
+    else:
+        text = "Winner: " + data["winner"] + "\n\n"
+
+    for name, score in data["scores"]:
+        text += name + " - " + str(score) + "\n"
+
+    messagebox.showinfo("Game Over", text)
+    set_status("Game over")
+    close_client()
+
+
+def server_disconnected():
+    """
+    Called when the server connection closes.
+    :return: None
+    """
+    set_status("Disconnected from server")
+
+
+def close_client():
+    """
+    Close the socket when the user closes the GUI window.
+    :return: None
+    """
+    global client_closed
+
+    client_closed = True
+
+    try:
+        if client_socket is not None:
+            client_socket.shutdown(socket.SHUT_RDWR)
+            client_socket.close()
+    except Exception:
+        pass
+
+    root.destroy()
+
+
+def build_gui():
+    """
+    Build all GUI widgets.
+    :return: None
+    """
+    global question_label, timer_label, status_label, score_text, answer_buttons
+
+    root.title(WINDOW_TITLE)
+    root.geometry(WINDOW_SIZE)
+    root.configure(bg=BG_COLOR)
+    root.protocol("WM_DELETE_WINDOW", close_client)
+
+    title_label = tk.Label(
+        root,
+        text=WINDOW_TITLE,
+        font=TITLE_FONT,
+        bg=BG_COLOR,
+        fg=TEXT_COLOR
+    )
+    title_label.pack(pady=15)
+
+    question_label = tk.Label(
+        root,
+        text="Waiting for server...",
+        font=QUESTION_FONT,
+        bg=PANEL_COLOR,
+        fg=TEXT_COLOR,
+        wraplength=QUESTION_WRAP_LENGTH,
+        height=5
+    )
+    question_label.pack(fill="x", padx=20, pady=10)
+
+    answers_frame = tk.Frame(root, bg=BG_COLOR)
+    answers_frame.pack(fill="x", padx=20)
+
+    answer_buttons = []
+    for i in range(ANSWER_AMOUNT):
+        button = tk.Button(
+            answers_frame,
+            text="",
+            font=ANSWER_FONT,
+            bg=BUTTON_COLOR,
+            fg=TEXT_COLOR,
+            height=2,
+            command=lambda index=i: send_answer(index)
+        )
+        button.grid(row=i // 2, column=i % 2, padx=5, pady=5, sticky="nsew")
+        answer_buttons.append(button)
+
+    answers_frame.columnconfigure(0, weight=1)
+    answers_frame.columnconfigure(1, weight=1)
+
+    timer_label = tk.Label(
+        root,
+        text="Time: --",
+        font=TIMER_FONT,
+        bg=BG_COLOR,
+        fg=TEXT_COLOR
+    )
+    timer_label.pack(pady=10)
+
+    score_text = tk.Text(
+        root,
+        height=6,
+        font=TEXT_FONT,
+        bg=PANEL_COLOR,
+        fg=TEXT_COLOR,
+        state="disabled"
+    )
+    score_text.pack(fill="x", padx=20, pady=10)
+
+    status_label = tk.Label(
+        root,
+        text="Not connected",
+        font=TEXT_FONT,
+        bg=BG_COLOR,
+        fg=TEXT_COLOR
+    )
+    status_label.pack(pady=5)
+
+
+def main():
+    """
+    Start the GUI client.
+    :return: None
+    """
+    global root
+
+    try:
+        root = tk.Tk()
+        build_gui()
+
+        if connect_to_server():
+            start_listening()
+            root.mainloop()
         else:
-            lines.insert(1, f"🏆 Winner: {winner}")
-        messagebox.showinfo("Game Over", "\n".join(lines))
-        self.lbl_question.config(text="Game over. Thanks for playing!")
-        self._set_status("Game over")
-
-    def _on_disconnect(self):
-        self._set_status("❗ Disconnected from server")
-        messagebox.showwarning("Disconnected", "The connection to the server was lost.")
-
-    def _set_status(self, msg: str):
-        self.lbl_status.config(text=msg)
-
-    # ─── Sending ─────────────────────────────
-
-    def _send_answer(self, idx: int):
-        if self.answered:
-            return
-        self.answered = True
-        # Highlight the selected button
-        for i, btn in enumerate(self.answer_buttons):
-            if i == idx:
-                btn.config(bg=THEME["accent"])
-            btn.config(state="disabled")
-        self._send_raw(f"ANSWER {idx}")
-        self._set_status("⏳ Waiting for round to end...")
-
-    def _send_raw(self, msg: str):
-        try:
-            if self.sock:
-                self.sock.sendall((msg + "\n").encode("utf-8"))
-        except Exception as e:
-            print(f"Send error: {e}")
+            root.destroy()
+    except Exception as e:
+        messagebox.showerror("Client Error", str(e))
 
 
-# ─────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = TriviaClient(root)
-    root.mainloop()
+    main()
