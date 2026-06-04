@@ -1,6 +1,10 @@
 """
-title: trivia project - client
-description: Simple Tkinter GUI client for the trivia game.
+title: server/client project - client
+author: Ori Kelty
+date: 4.12.2025
+description: This is the client code for the trivia game.
+The client connects to the server, shows the game GUI, receives questions,
+sends answers, shows the timer, scores, round results, and game over message.
 """
 
 import socket
@@ -52,17 +56,17 @@ MESSAGE_FIELDS_AMOUNT = {
 }
 
 
-client_socket = None
+client_socket: socket.socket
 username = ""
 answered = False
 client_closed = False
 
-root = None
-question_label = None
-timer_label = None
-status_label = None
-score_text = None
-answer_buttons = []
+root: tk.Tk
+question_label: tk.Label
+timer_label: tk.Label
+status_label: tk.Label
+score_text: tk.Text
+answer_buttons: list[tk.Button] = []
 
 
 def set_status(text):
@@ -121,20 +125,23 @@ def listen_to_server():
                 break
 
             msg_type, fields = protocol.split_message(message)
-            root.after(0, handle_server_message, msg_type, fields)
+            root.after_idle(
+                lambda unused=None, mt=msg_type, fs=fields: handle_server_message(mt, fs),
+                None
+            )
 
         except Exception:
             break
 
     if not client_closed:
-        root.after(0, server_disconnected)
+        root.after_idle(lambda unused=None: server_disconnected(), None)
 
 
 def handle_server_message(msg_type, fields):
     """
     Handle one message from the server.
     :param msg_type: message type
-    :param data: message data
+    :param fields: message fields
     :return: None
     """
     try:

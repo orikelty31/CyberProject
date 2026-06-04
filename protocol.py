@@ -1,6 +1,10 @@
 """
-title: trivia project - protocol
-description: Simple text protocol with message length.
+title: server/client project - protocol
+author: Ori Kelty
+date: 4.12.2025
+description: This is the protocol code for the trivia game.
+The protocol sends and receives text messages between the client and server
+using the format [8 digits length]:[message].
 
 Every message is sent like this:
 [8 digits length]:[message]

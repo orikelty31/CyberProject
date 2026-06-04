@@ -1,6 +1,11 @@
 """
-title: trivia project - server
-description: Simple trivia server that sends questions to clients.
+title: server/client project - server
+author: Ori Kelty
+date: 4.12.2025
+description: This is the server code for the trivia game.
+The server handles client connections, reads questions from questions.json,
+sends questions, receives answers, calculates scores, handles ties,
+and starts a new game after the previous game ends.
 """
 
 import json
