@@ -1,7 +1,7 @@
 """
 title: server/client project - client
 author: Ori Kelty
-date: 4.12.2025
+date: 04.06.2026
 description: This is the client code for the trivia game.
 The client connects to the server, shows the game GUI, receives questions,
 sends answers, shows the timer, scores, round results, and game over message.

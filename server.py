@@ -1,7 +1,7 @@
 """
 title: server/client project - server
 author: Ori Kelty
-date: 4.12.2025
+date: 04.06.2026
 description: This is the server code for the trivia game.
 The server handles client connections, reads questions from questions.json,
 sends questions, receives answers, calculates scores, handles ties,
