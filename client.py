@@ -10,10 +10,13 @@ sends answers, shows the timer, scores, round results, and game over message.
 import socket
 import threading
 import tkinter as tk
+import logging
 from tkinter import messagebox, simpledialog
 
 import protocol
 
+
+log = logging.getLogger("client")
 
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 5555
@@ -76,6 +79,7 @@ def set_status(text):
     :return: None
     """
     status_label.config(text=text)
+    log.info("Status changed: %s", text)
 
 
 def connect_to_server():
@@ -87,9 +91,11 @@ def connect_to_server():
 
     username = simpledialog.askstring("Join Game", "Enter your name:", parent=root)
     if username is None or username.strip() == "":
+        log.info("User cancelled username dialog")
         return False
 
     username = username.strip()
+    log.info("Trying to connect as %s", username)
 
     try:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -97,8 +103,10 @@ def connect_to_server():
         message = protocol.build_message(MSG_JOIN, [username])
         protocol.send_message(client_socket, message)
         set_status("Connected as " + username)
+        log.info("Connected to server %s:%s", SERVER_IP, SERVER_PORT)
         return True
     except Exception as e:
+        log.error("Connection error: %s", e)
         messagebox.showerror("Connection Error", str(e))
         return False
 
@@ -110,6 +118,7 @@ def start_listening():
     """
     thread = threading.Thread(target=listen_to_server, daemon=True)
     thread.start()
+    log.info("Listening thread started")
 
 
 def listen_to_server():
@@ -122,15 +131,18 @@ def listen_to_server():
         try:
             message = protocol.receive_message(client_socket)
             if message is None:
+                log.info("Server closed connection")
                 break
 
             msg_type, fields = protocol.split_message(message)
+            log.info("Received server message: %s %s", msg_type, fields)
             root.after_idle(
                 lambda unused=None, mt=msg_type, fs=fields: handle_server_message(mt, fs),
                 None
             )
 
-        except Exception:
+        except Exception as e:
+            log.error("Listen error: %s", e)
             break
 
     if not client_closed:
@@ -147,13 +159,16 @@ def handle_server_message(msg_type, fields):
     try:
         if msg_type in MESSAGE_FIELDS_AMOUNT:
             if len(fields) < MESSAGE_FIELDS_AMOUNT[msg_type]:
+                log.warning("Bad message from server: %s %s", msg_type, fields)
                 set_status("Bad message from server: " + msg_type)
                 return
 
         if msg_type == MSG_WAIT:
+            log.info("Handling WAIT message")
             set_status(fields[0])
 
         elif msg_type == MSG_QUESTION:
+            log.info("Handling QUESTION message")
             data = {
                 "round": int(fields[0]),
                 "total": int(fields[1]),
@@ -164,9 +179,11 @@ def handle_server_message(msg_type, fields):
             show_question(data)
 
         elif msg_type == MSG_TIMER:
+            log.info("Handling TIMER message: %s", fields[0])
             timer_label.config(text="Time: " + fields[0])
 
         elif msg_type == MSG_RESULT:
+            log.info("Handling RESULT message")
             data = {
                 "correct_index": int(fields[0]),
                 "correct_text": fields[1],
@@ -175,10 +192,12 @@ def handle_server_message(msg_type, fields):
             show_result(data)
 
         elif msg_type == MSG_SCORES:
+            log.info("Handling SCORES message")
             data = protocol.split_scores(fields[0])
             show_scores(data)
 
         elif msg_type == MSG_GAMEOVER:
+            log.info("Handling GAMEOVER message")
             scores = protocol.split_scores(fields[2])
             data = {
                 "winner": fields[0],
@@ -187,6 +206,7 @@ def handle_server_message(msg_type, fields):
             }
             show_game_over(data)
     except Exception as e:
+        log.error("Message error: %s", e)
         set_status("Message error: " + str(e))
 
 
@@ -204,6 +224,7 @@ def show_question(data):
     question_label.config(text=title + "\n\n" + data["question"])
     timer_label.config(text="Time: " + str(data["time"]))
     set_status("Choose an answer")
+    log.info("Showing question round %s/%s: %s", data["round"], data["total"], data["question"])
 
     options = data["options"]
 
@@ -224,9 +245,11 @@ def send_answer(index):
     global answered
 
     if answered:
+        log.info("Answer ignored because player already answered")
         return
 
     answered = True
+    log.info("Player selected answer index %s", index)
 
     for button in answer_buttons:
         button.config(state="disabled")
@@ -237,7 +260,9 @@ def send_answer(index):
     try:
         message = protocol.build_message(MSG_ANSWER, [index])
         protocol.send_message(client_socket, message)
+        log.info("Answer sent to server: %s", index)
     except Exception as e:
+        log.error("Send answer error: %s", e)
         set_status("Send error: " + str(e))
 
 
@@ -257,8 +282,10 @@ def show_result(data):
 
     if username in data["scorers"]:
         set_status("Correct! Answer: " + data["correct_text"])
+        log.info("Round result: correct")
     else:
         set_status("Wrong. Answer: " + data["correct_text"])
+        log.info("Round result: wrong")
 
 
 def show_scores(scores):
@@ -274,6 +301,7 @@ def show_scores(scores):
         score_text.insert("end", name + " - " + str(score) + "\n")
 
     score_text.config(state="disabled")
+    log.info("Scores updated: %s", scores)
 
 
 def show_game_over(data):
@@ -292,6 +320,7 @@ def show_game_over(data):
 
     messagebox.showinfo("Game Over", text)
     set_status("Game over")
+    log.info("Game over shown: %s", data)
     close_client()
 
 
@@ -301,6 +330,7 @@ def server_disconnected():
     :return: None
     """
     set_status("Disconnected from server")
+    log.info("Server disconnected")
 
 
 def close_client():
@@ -311,15 +341,19 @@ def close_client():
     global client_closed
 
     client_closed = True
+    log.info("Closing client")
 
     try:
         if client_socket is not None:
             client_socket.shutdown(socket.SHUT_RDWR)
             client_socket.close()
-    except Exception:
+            log.info("Client socket closed")
+    except Exception as e:
+        log.warning("Error while closing client socket: %s", e)
         pass
 
     root.destroy()
+    log.info("GUI closed")
 
 
 def build_gui():
@@ -333,6 +367,7 @@ def build_gui():
     root.geometry(WINDOW_SIZE)
     root.configure(bg=BG_COLOR)
     root.protocol("WM_DELETE_WINDOW", close_client)
+    log.info("Building GUI")
 
     title_label = tk.Label(
         root,
@@ -416,12 +451,42 @@ def main():
 
         if connect_to_server():
             start_listening()
+            log.info("Starting GUI mainloop")
             root.mainloop()
         else:
             root.destroy()
+            log.info("Client closed because connection failed")
     except Exception as e:
+        log.error("Client error: %s", e)
         messagebox.showerror("Client Error", str(e))
 
 
+def run_assert_tests():
+    """
+    Run simple assert tests for the client settings.
+    :return: None
+    """
+    assert SERVER_IP != "", "SERVER_IP cannot be empty"
+    assert SERVER_PORT > 0, "SERVER_PORT must be positive"
+    assert ANSWER_AMOUNT == 4, "Trivia game must have 4 answer buttons"
+    assert MESSAGE_FIELDS_AMOUNT[MSG_QUESTION] == 5, "QUESTION message must have 5 fields"
+    assert MESSAGE_FIELDS_AMOUNT[MSG_GAMEOVER] == 3, "GAMEOVER message must have 3 fields"
+
+    message = protocol.build_message(MSG_JOIN, ["Ori"])
+    command, fields = protocol.split_message(message)
+    assert command == MSG_JOIN, "JOIN command build failed"
+    assert fields == ["Ori"], "JOIN fields build failed"
+
+    log.info("Client assert tests passed")
+
+
 if __name__ == "__main__":
+    logging.basicConfig(
+        filename="client.log",
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        filemode="w",
+    )
+    protocol.run_assert_tests()
+    run_assert_tests()
     main()

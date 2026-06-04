@@ -13,7 +13,11 @@ Example:
 00000023:ANSWER|2
 """
 
+import logging
 from urllib.parse import quote, unquote
+
+
+log = logging.getLogger("protocol")
 
 
 LENGTH_SIZE = 8
@@ -35,7 +39,9 @@ def send_message(sock, message):
         length = str(len(message_bytes)).zfill(LENGTH_SIZE)
         full_message = length.encode() + SEPARATOR + message_bytes
         sock.sendall(full_message)
+        log.info("Sent message: %s", message)
     except Exception as e:
+        log.error("Error sending message: %s", e)
         print("Error sending message:", e)
 
 
@@ -48,19 +54,25 @@ def receive_message(sock):
     try:
         length_text = receive_exact(sock, LENGTH_SIZE)
         if length_text is None:
+            log.info("Connection closed while receiving message length")
             return None
 
         separator = receive_exact(sock, 1)
         if separator != SEPARATOR:
+            log.warning("Bad protocol separator received")
             return None
 
         message_length = int(length_text.decode())
         message_bytes = receive_exact(sock, message_length)
         if message_bytes is None:
+            log.info("Connection closed while receiving message body")
             return None
 
-        return message_bytes.decode()
+        message = message_bytes.decode()
+        log.info("Received message: %s", message)
+        return message
     except Exception as e:
+        log.error("Error receiving message: %s", e)
         print("Error receiving message:", e)
         return None
 
@@ -78,6 +90,7 @@ def receive_exact(sock, size):
         try:
             part = sock.recv(size - len(data))
         except (ConnectionResetError, ConnectionAbortedError, OSError):
+            log.info("Socket disconnected while receiving exact data")
             return None
 
         if not part:
@@ -102,9 +115,12 @@ def build_message(command, fields=None):
         encoded_fields.append(quote(str(field), safe=""))
 
     if len(encoded_fields) == 0:
+        log.debug("Built message: %s", command)
         return command
 
-    return command + FIELD_SEPARATOR + FIELD_SEPARATOR.join(encoded_fields)
+    message = command + FIELD_SEPARATOR + FIELD_SEPARATOR.join(encoded_fields)
+    log.debug("Built message: %s", message)
+    return message
 
 
 def split_message(message):
@@ -120,6 +136,7 @@ def split_message(message):
     for field in parts[1:]:
         fields.append(unquote(field))
 
+    log.debug("Split message command=%s fields=%s", command, fields)
     return command, fields
 
 
@@ -134,7 +151,9 @@ def build_scores(scores):
     for name, score in scores.items():
         pairs.append(quote(str(name), safe="") + PAIR_SEPARATOR + str(score))
 
-    return LIST_SEPARATOR.join(pairs)
+    scores_text = LIST_SEPARATOR.join(pairs)
+    log.debug("Built scores text: %s", scores_text)
+    return scores_text
 
 
 def split_scores(scores_text):
@@ -153,6 +172,7 @@ def split_scores(scores_text):
         name, score = pair.split(PAIR_SEPARATOR, 1)
         scores[unquote(name)] = int(score)
 
+    log.debug("Split scores: %s", scores)
     return scores
 
 
@@ -167,7 +187,9 @@ def build_list(items):
     for item in items:
         encoded_items.append(quote(str(item), safe=""))
 
-    return LIST_SEPARATOR.join(encoded_items)
+    list_text = LIST_SEPARATOR.join(encoded_items)
+    log.debug("Built list text: %s", list_text)
+    return list_text
 
 
 def split_list(list_text):
@@ -185,4 +207,44 @@ def split_list(list_text):
     for item in items:
         decoded_items.append(unquote(item))
 
+    log.debug("Split list: %s", decoded_items)
     return decoded_items
+
+
+def run_assert_tests():
+    """
+    Run simple assert tests for the protocol functions.
+    :return: None
+    """
+    message = build_message("ANSWER", [2])
+    assert message == "ANSWER|2", "build_message failed"
+
+    command, fields = split_message("ANSWER|2")
+    assert command == "ANSWER", "split_message command failed"
+    assert fields == ["2"], "split_message fields failed"
+
+    options = ["4", "6", "8", "10"]
+    options_text = build_list(options)
+    assert split_list(options_text) == options, "list protocol failed"
+
+    scores = {"Ori": 10, "Noam": 20}
+    scores_text = build_scores(scores)
+    assert split_scores(scores_text) == scores, "scores protocol failed"
+
+    special_message = build_message("WAIT", ["hello|with;symbols"])
+    command, fields = split_message(special_message)
+    assert command == "WAIT", "special message command failed"
+    assert fields == ["hello|with;symbols"], "special message fields failed"
+
+    log.info("Protocol assert tests passed")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        filename="protocol.log",
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        filemode="w",
+    )
+    run_assert_tests()
+    print("Protocol assert tests passed")
